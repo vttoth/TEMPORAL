@@ -1,0 +1,29 @@
+<html>
+<head>
+<title>RIBFED: Temporal testing ground</title>
+<style>
+td
+{
+  vertical-align: top;
+}
+</style>
+<script lang="javascript" src="temporal.js"></script>
+</head>
+<body>
+<table style='border: 0'>
+<tr><td><div style='min-height: 135px'>
+<h1>The RIBFED experiment -- temporal testing ground</h1>
+<p>Rotate, Illuminate, Blur =&gt; Focus, Equalize, Deconvolve. Because that's what we do.</p>
+<p><button onclick='loadAll()'>Load dataset</button>&nbsp;&nbsp;<button onclick='saveAll()'>Save dataset</button>&nbsp;&nbsp;&nbsp;<b><span id='nobs'>0</span> observations so far.</b></p>
+<table border=0>
+<tr><td>Counter:&nbsp;</td><td><input id='counter' style='width: 40em'></input>&nbsp;<button onclick='setCounter()'>Set</button></td></tr>
+<tr><td>Divisor:&nbsp;</td><td><input id='divisor' style='width: 40em'></input>&nbsp;<button onclick='setDivisor()'>Set</button></td></tr>
+</table>
+<p id='comment'>&nbsp;</p>
+<p class='controls'><button title='Skip back a week' onclick='skip(-7*SIDAY)'>&#10074;&#9664;&#9664;</button>&nbsp;<button title='Skip back an hour' onclick='skip(-1)'>&#10074;&#9664;</button>&nbsp;&nbsp;<button onclick='runBlur()' title='Blur!'>&#10054;</button>&nbsp;&nbsp;<button title='Skip an hour' onclick='skip(1)'>&#9654;&#10074;</button>&nbsp;<button title='Skip a week' onclick='skip(7*SIDAY)'>&#9654;&#9654;&#10074;</button>&nbsp;&nbsp;&nbsp;<button title='Run a day' onclick='runIt(ME.LAT,ME.LON,(ME.J - EPOCH)*24,24)'>&#9654;</button>&nbsp;&nbsp;&nbsp;<button title='Run a year' onclick='runSD(ME.LAT,ME.LON,(ME.J - EPOCH)*24,365.25*24)'>&#9654;&#9654;</button>&nbsp;&nbsp;&nbsp;<button title='Fit!' onClick='doFit()'>&#9868;</button>&nbsp;&nbsp;&nbsp;<span id='progress'></span></p></div>
+</td><td id='deblur'></td></tr>
+<tr><td id='orig'></td><td id='cia'></td></tr>
+<tr><td id='blurred'></td><td id='spinner'></td></tr>
+</table>
+</body>
+</html>
