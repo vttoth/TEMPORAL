@@ -8,6 +8,7 @@ var INTERVAL = 50;                       // ms for animation
 var EPOCH = 2460086;                     // May 21, 2023 at 12:00:00
 var ME = {LAT: 45, LON: -75, J: EPOCH};  // Direction to observer
 var IMSIZE = 1300;                       // Image size in units of aperture
+var SRATIO = 0.95;
 {
   let meLat = (new URLSearchParams(window.location.search)).get('lat');
   let meLon = (new URLSearchParams(window.location.search)).get('lon');
@@ -46,13 +47,23 @@ for (let i = 0; i < HEIGHT; i++) blur[i] = Array(HEIGHT).fill(0);
 
 // Helpers and physics functions
 
+// Convert to days and hours...
+function daysAndHours(J)
+{
+  return Math.floor(J+1e-8)+" and "+Math.floor((J-Math.floor(J+1e-8))*24+5e-6) + " hours.";
+}
+
 // The averaged PSF (elliptic integral) approximation
 function E(r)
 {
-  //r *= 1300/HEIGHT;     // Actual pixel size for a ~30pc planet
   r *= IMSIZE/HEIGHT;     // Actual pixel size for a ~1pc planet
-  let r2 = r/2;
-  return ((1-Math.exp(-Math.PI*r2))/Math.PI+Math.exp(-(r*r)/Math.PI))/(1+r2);
+  r = Math.abs(r);
+  let r2 = r*r;
+  let r4 = r2*r2;
+  let r8 = r4*r4;
+  let e8 = Math.exp(-r8*2/Math.PI);
+  //return (1-r2/4-3*r4/64)*e8+(r>0?(1/(2*r)+1/(16*r2*r))*(1-e8):0);
+  return (1-(0.046875*r2+0.25)*r2)*e8 + (r>0 ? (0.0625/r2+0.5)/r*(1-e8) : 0);
 }
 
 // A sigmoid-type helper to make images appear more visually appealing
@@ -398,6 +409,7 @@ function onBlurClick(e)
 function skip(delta)
 {
   ME.J += delta/24;
+  document.getElementById("J").innerText = daysAndHours(ME.J);
   showIt(ME.LAT, ME.LON, (ME.J - EPOCH)*24);
   if (bglobe)
   {
@@ -443,6 +455,7 @@ window.addEventListener('DOMContentLoaded', () =>
   readMap();
   document.getElementById('counter').value = (stepCount.toString()).replace(/\s+/g,' ');
   document.getElementById('divisor').value = (stepDivisor.toString()).replace(/\s+/g,' ');
+  document.getElementById("J").innerText = daysAndHours(ME.J);
 });
 
 function setCounter()
@@ -505,6 +518,7 @@ function loadAll()
       }
 
       document.getElementById("nobs").innerText = observations.length;
+      document.getElementById("J").innerText = daysAndHours(ME.J);
       fileInput.remove();
     });
     reader.readAsText(file);
@@ -573,6 +587,7 @@ function workFit(e)
   var observations = context.observations;
   var IMSIZE = context.IMSIZE;
   var HEIGHT = context.HEIGHT;
+  var SRATIO = context.SRATIO;
   var E = new Function ('IMSIZE', 'HEIGHT', 'r', context.E + "; return E(r);");
   var getIllumination = new Function('LAT', 'LON', 'J', context.getIllumination + "; return getIllumination(LAT, LON, J);");
 
@@ -632,7 +647,7 @@ function workFit(e)
     let p0 = (ME.LAT >= 0) ? 0 : -ME.LAT;
 
     // We create a (slightly) overdetermined system on purpose
-    let theSize = getSize(Math.floor(observations.length * 0.95));
+    let theSize = getSize(Math.floor(observations.length * SRATIO));
     if (!theSize) return;
 
     let H = theSize[0];
@@ -747,51 +762,45 @@ function workFit(e)
 // These helpers are to be revised
 function stepDivisor()
 {
-  return observations.length;
+  return 2000; // observations.length;
 }
 
 function stepCount()
 {
-  return 100;
+  return 500;
 }
 
 // Used for evaluating the goodness of the fit
-function resample(data, newWidth, newHeight)
+function resample(val, M, DM, N, K, L)
 {
-  let width = data.length;
-  let height = data[0].length;
-  
-  let xRatio = width / newWidth; 
-  let yRatio = height / newHeight;
-  
-  let newData = [];
-  for (let y = 0; y < newHeight; y++)
+  const res = new Array(K).fill(null).map(() => new Array(L).fill(0));
+
+  for (let i = 0; i < K; i++)
   {
-    let newRow = [];
-    for (let x = 0; x < newWidth; x++)
+    for (let j = 0; j < L; j++)
     {
-      let x1 = Math.floor(x * xRatio);
-      let x2 = Math.ceil(x * xRatio);
-      let y1 = Math.floor(y * yRatio);
-      let y2 = Math.ceil(y * yRatio);
-      
-      let topLeft = data[x1][y1];
-      let topRight = data[x2][y1];
-      let bottomLeft = data[x1][y2];
-      let bottomRight = data[x2][y2];
-      
-      let xLerp = (xRatio * x) - x1;
-      let yLerp = (yRatio * y) - y1;
-      let top = topLeft + (topRight - topLeft) * xLerp;
-      let bottom = bottomLeft + (bottomRight - bottomLeft) * xLerp;
-      let newVal = top + (bottom - top) * yLerp;
-      
-      newRow.push(newVal);
+      const xStart = Math.floor(i * (M / K));
+      const xEnd = Math.floor((i + 1) * (M / K));
+      const yStart = Math.floor(j * (N / L));
+      const yEnd = Math.floor((j + 1) * (N / L));
+
+      let sum = 0;
+      let count = 0;
+
+      for (let x = xStart; x < xEnd; x++)
+      {
+        for (let y = yStart; y < yEnd; y++)
+        {
+          sum += val[DM+x][y];
+          count++;
+        }
+      }
+      res[i][j] = sum / count;
     }
-    newData.push(newRow);
   }
-  return newData;
+  return res;
 }
+
 
 function doFit()
 {
@@ -826,14 +835,28 @@ function doFit()
       document.querySelectorAll('.controls button').forEach((e) => {e.disabled = false; e.style.cursor = ''; });
       worker.terminate();
 
-      let error = (resample(data,sglobe.width,sglobe.height).flat().map((d,i) => (d - sol[i])**2)).reduce((a,b)=>a+b)/sol.length;
+      //let error = (resample(data,sglobe.width,sglobe.height).flat().map((d,i) => (d - sol[i])**2)).reduce((a,b)=>a+b)/sol.length;
+
+      let M = Math.round((180 - Math.abs(ME.LAT)) * data.length / 180);
+      let DM = ME.LAT < 0 ? Math.round((180 + ME.LAT) * data.length / 180) : 0;
+      let orig = resample(data, M, DM, data[0].length, sglobe.height, sglobe.width).flat();
+
+      let oavg = orig.reduce((a,b)=>a+b)/orig.length;
+      let osdv = Math.sqrt(orig.map(d=>(d-oavg)**2).reduce((a,b)=>a+b)/orig.length);
+
+      let savg = sol.reduce((a,b)=>a+b)/sol.length;
+      let ssdv = Math.sqrt(sol.map(d=>(d-oavg)**2).reduce((a,b)=>a+b)/sol.length);
+
+      let error = Math.sqrt((orig.map((d,i) => ((((d-oavg)*ssdv/osdv+savg)) - sol[i])**2)).reduce((a,b)=>a+b)/sol.length);
+
+      let SNR = savg / error;
 
       document.getElementById('comment').innerHTML = "Model height: " + sglobe.height + ", width: " + sglobe.width + "<br/>" +
-                                                     "Residual: " + delta.toPrecision(3) + ", Error: " + error.toPrecision(3);
+                                                     "Residual: " + delta.toPrecision(3) + ", SNR: " + SNR.toPrecision(3);
     }
   }
 
   worker.postMessage({ME: ME, SIDAY:SIDAY, STEPDIV: stepDivisor(), KMAX: stepCount(), RADIUS:RADIUS, EPOCH: EPOCH, observations: observations,
-                      IMSIZE: IMSIZE, HEIGHT: HEIGHT, E: E.toString(), getIllumination : getIllumination.toString()});
+                      IMSIZE: IMSIZE, HEIGHT: HEIGHT, SRATIO: SRATIO, E: E.toString(), getIllumination : getIllumination.toString()});
 
 }
