@@ -1,3 +1,18 @@
+// Copyright (c) 2023 Viktor T. Toth
+// 
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+// 
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 // Model parameters
 
 var WIDTH = (new URLSearchParams(window.location.search)).get('width');
@@ -519,6 +534,12 @@ function loadAll()
 
       document.getElementById("nobs").innerText = observations.length;
       document.getElementById("J").innerText = daysAndHours(ME.J);
+      showIt(ME.LAT, ME.LON, (ME.J - EPOCH)*24);
+      if (bglobe)
+      {
+        bglobe.disabled = true;
+        bglobe.style.cursor = 'not-allowed';
+      }
       fileInput.remove();
     });
     reader.readAsText(file);
