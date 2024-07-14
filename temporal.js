@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Viktor T. Toth
+// Copyright (c) 2024 Viktor T. Toth
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -24,6 +24,21 @@ var EPOCH = 2460086;                     // May 21, 2023 at 12:00:00
 var ME = {LAT: 45, LON: -75, J: EPOCH};  // Direction to observer
 var IMSIZE = 1300;                       // Image size in units of aperture
 var SRATIO = 0.95;
+var THRESHOLD = 1.0; // No clouds
+// THRESHOLD = 0.5; // 40%
+// THRESHOLD = 0.4; // 70%
+
+// Data collection run parameters
+let PARAMS =
+{
+  DSR: 4,
+  ITER: 500,
+  GDIV: 2000,
+  NINT: 200,
+  INTER: 2.5,
+  SAMPLES: 120
+};
+
 {
   let meLat = (new URLSearchParams(window.location.search)).get('lat');
   let meLon = (new URLSearchParams(window.location.search)).get('lon');
@@ -43,6 +58,10 @@ let data = [];         // The map data, cylindrical projection read upon window 
 let image = [];        // The projected globe
 let blur = [];         // The blurred globe
 let sol = [];          // The deblurred solution
+let solH = 0;
+let solW = 0;
+let delta = 0;
+let SNR = 0;
 
 var observations = []; // "Observations" of the blurred globe will be collected here
 
@@ -60,12 +79,17 @@ for (let i = 0; i < HEIGHT; i++) data[i] = Array(WIDTH).fill(0);
 for (let i = 0; i < HEIGHT; i++) image[i] = Array(HEIGHT).fill(0);
 for (let i = 0; i < HEIGHT; i++) blur[i] = Array(HEIGHT).fill(0);
 
+// Clouds...
+var cloudLayers = initializeCloudLayers(HEIGHT, 4, THRESHOLD);
+var cloudAvg = 0;
+var cloudList = [];
+
 // Helpers and physics functions
 
 // Convert to days and hours...
 function daysAndHours(J)
 {
-  return Math.floor(J+1e-8)+" and "+Math.floor((J-Math.floor(J+1e-8))*24+5e-6) + " hours.";
+  return Math.floor(J+1e-8)+" and "+Math.floor((J-Math.floor(J+1e-8))*24+5e-6) + " hours";
 }
 
 // The averaged PSF (elliptic integral) approximation
@@ -121,58 +145,63 @@ function getIllumination(LAT, LON, J)
 // The main map
 
 // Read the map data from a file and display
+function onLoadMap(arrayBuffer)
+{
+  const buffer = new Float64Array(arrayBuffer);
+  
+  let index = 0;
+  for (let i = 0; i < HEIGHT; i++)
+  {
+    for (let j = 0; j < WIDTH; j++)
+    {
+      data[i][j] = buffer[index++];
+    }
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = WIDTH;
+  canvas.height = HEIGHT;
+
+  const ctx = canvas.getContext('2d');
+  let img = ctx.createImageData(WIDTH, HEIGHT);
+  let pixels = img.data;
+
+  for (let i = 0; i < HEIGHT; i++)
+  {
+    for (let j = 0; j < WIDTH; j++)
+    {
+      const value = data[i][j];
+      let p = Math.round(value*255);
+      pixels[i*WIDTH*4 + j*4 + 0] = p;
+      pixels[i*WIDTH*4 + j*4 + 1] = p;
+      pixels[i*WIDTH*4 + j*4 + 2] = p;
+      pixels[i*WIDTH*4 + j*4 + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+
+  // Append canvas to document
+  document.getElementById('orig').appendChild(canvas);
+  canvas.style.width = 720;
+  canvas.style.height = 360;
+  canvas.style.marginRight = '20px';
+
+  showIt(ME.LAT, ME.LON, (ME.J - EPOCH)*24);
+}
+
 function readMap()
 {
-  const request = new XMLHttpRequest();
-  request.open('GET', 'marble' + WIDTH + 'x' + HEIGHT + '.raw');
-  request.responseType = 'arraybuffer';
-
-  request.onload = () =>
+  const url = 'marble' + WIDTH + 'x' + HEIGHT + '.raw';
+  fetch(url).then(response =>
   {
-    const arrayBuffer = request.response;
-    const buffer = new Float64Array(arrayBuffer);
-  
-    let index = 0;
-    for (let i = 0; i < HEIGHT; i++)
+    if (response.ok)
     {
-      for (let j = 0; j < WIDTH; j++)
-      {
-        data[i][j] = buffer[index++];
-      }
+      return response.arrayBuffer();
     }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = WIDTH;
-    canvas.height = HEIGHT;
-
-    const ctx = canvas.getContext('2d');
-    let img = ctx.createImageData(WIDTH, HEIGHT);
-    let pixels = img.data;
-
-    for (let i = 0; i < HEIGHT; i++)
-    {
-      for (let j = 0; j < WIDTH; j++)
-      {
-        const value = data[i][j];
-        let p = Math.round(value*255);
-        pixels[i*WIDTH*4 + j*4 + 0] = p;
-        pixels[i*WIDTH*4 + j*4 + 1] = p;
-        pixels[i*WIDTH*4 + j*4 + 2] = p;
-        pixels[i*WIDTH*4 + j*4 + 3] = 255;
-      }
-    }
-    ctx.putImageData(img, 0, 0);
-
-    // Append canvas to document
-    document.getElementById('orig').appendChild(canvas);
-    canvas.style.width = 720;
-    canvas.style.height = 360;
-    canvas.style.marginRight = '20px';
-
-    showIt(ME.LAT, ME.LON, (ME.J - EPOCH)*24);
-  };
-
-  request.send();
+  }).then(arrayBuffer =>
+  {
+    onLoadMap(arrayBuffer);
+  });
 }
 
 // The projected globe
@@ -186,6 +215,10 @@ function doMap(f0, l0, h)
 
   h *= 24/SIDAY;        // Convert to sidereal 'hours' (1/24th a full rotation)
   h = (h%24+24)%24-24;  // To ensure that we are in the proper range
+
+  let cloudCover = combineCloudLayers(cloudLayers, cloudLayers[0].cloudCover.length);
+  cloudAvg = ((af) => af.reduce((sum, num) => sum + num, 0) / af.length)(cloudCover.flat());
+  document.getElementById("clouds").innerText = (100 * cloudAvg).toFixed(1);
 
   for (let i = -RADIUS; i < RADIUS; i++)
   {
@@ -210,8 +243,10 @@ function doMap(f0, l0, h)
       let H = (getIllumination(90-p,q-180,J).h*Math.PI/180);
       p = Math.floor(p*HEIGHT/180);
       q = Math.floor(q*WIDTH/360);
+      let cloud = cloudCover[p][q];
       let I = H>0 ? Math.sin(H) : 0;
-      image[i+RADIUS][j+RADIUS] = I * (0.25 + 0.75*data[p][q]);
+      //image[i+RADIUS][j+RADIUS] = I * (0.25 + 0.75*data[p][q]);
+      image[i+RADIUS][j+RADIUS] = I * (cloud + (1.0 - cloud)*data[p][q]);
     }
   }
 }
@@ -271,18 +306,21 @@ function showCIA(J)
 
   let img = ctx.createImageData(WIDTH, HEIGHT);
   let pixels = img.data;
+  let cloudCover = combineCloudLayers(cloudLayers, cloudLayers[0].cloudCover.length);
 
   for (let i = 0; i < HEIGHT; i++)
   {
     for (let j = 0; j < WIDTH; j++)
     {
-    const value = sigmoid(getIllumination(90-i*180/HEIGHT,j*360/WIDTH-180,J).h*Math.PI/180) * (0.25 + 0.75*data[i][j]);
+      const cloud = cloudCover[i][j];
+      //const value = sigmoid(getIllumination(90-i*180/HEIGHT,j*360/WIDTH-180,J).h*Math.PI/180) * (0.25 + 0.75*data[i][j]);
+      const value = sigmoid(getIllumination(90-i*180/HEIGHT,j*360/WIDTH-180,J).h*Math.PI/180) * (cloud + (1-cloud)*data[i][j]);
 
-    let p = Math.round(value*255);
-    pixels[i*WIDTH*4 + j*4 + 0] = p;
-    pixels[i*WIDTH*4 + j*4 + 1] = p;
-    pixels[i*WIDTH*4 + j*4 + 2] = p;
-    pixels[i*WIDTH*4 + j*4 + 3] = 255;
+      let pix = Math.round(value*255);
+      pixels[i*WIDTH*4 + j*4 + 0] = pix;
+      pixels[i*WIDTH*4 + j*4 + 1] = pix;
+      pixels[i*WIDTH*4 + j*4 + 2] = pix;
+      pixels[i*WIDTH*4 + j*4 + 3] = 255;
     }
   }
   ctx.putImageData(img, 0, 0);
@@ -323,7 +361,7 @@ function doBlur(e)
 }
 
 // Initialize and run the worker thread, manage UI
-function runBlur()
+function runBlur(callback)
 {
   if (document.isBlurring) return;
   document.isBlurring = true;
@@ -350,6 +388,8 @@ function runBlur()
       bglobe.disabled = false;
       bglobe.style.cursor = 'crosshair';
       worker.terminate();
+
+      if (callback) callback();
     }
   };
 
@@ -393,6 +433,63 @@ function showBlur()
     bctx.putImageData(img, 0, 0);
 }
 
+
+function iterateGrid(N, K, callback) {
+  // Round up K to the next perfect square
+  const sqrtK = Math.ceil(Math.sqrt(K));
+  const spacing = N / sqrtK;
+
+  for (let i = 0; i < sqrtK; i++) {
+    for (let j = 0; j < sqrtK; j++) {
+      //const x = Math.round((i + 0.5) * spacing);
+      //const y = Math.round((j + 0.5) * spacing);
+      const x = Math.round((i + Math.random()) * spacing);
+      const y = Math.round((j + Math.random()) * spacing);
+
+      if (x < N && y < N) {
+        callback(x, y);
+      }
+    }
+  }
+}
+
+function processManyClicks(K)
+{
+  iterateGrid(HEIGHT, K, processGlobeClick);
+}
+
+function collectData(N, H, K)
+{  // Run N iterations, H hours apart, collecting K points each
+   // Overall, we'll have N*K data points.
+
+  function processNext()
+  {
+    if (N-- > 0)
+    {
+      document.getElementById('comment').innerText = `Processing iteration, ${N} remaining.`;
+      runBlur(function()
+      {
+        document.getElementById('comment').innerText = `Blur complete, running ${K} clicks`;
+        processManyClicks(K);
+        document.getElementById('comment').innerText = `Skipping ${H} hours.`;
+        skip(H);
+        cloudList.push([ME.J, cloudAvg]);
+        processNext();
+      });
+    }
+    else
+    {
+      document.getElementById('comment').innerText = "All done, running doFit()";
+      doFit(function()
+      {
+      });
+    }
+  }
+
+  processNext();
+}
+
+
 // Manage click events, collect "observations"
 function onBlurClick(e)
 {
@@ -400,7 +497,12 @@ function onBlurClick(e)
 
   let i = Math.floor(e.offsetY * HEIGHT / parseInt(bglobe.style.height));
   let j = Math.floor(e.offsetX * HEIGHT / parseInt(bglobe.style.height));
-  console.log("bglobe[" + i + "][" + j + "]");
+  processGlobeClick(i, j);
+}
+
+function processGlobeClick(i, j)
+{
+  //console.log("bglobe[" + i + "][" + j + "]");
   let found = false;  // To avoid duplicates/degenerate convolution matrix
   observations.every((o) =>
   {
@@ -423,6 +525,9 @@ function onBlurClick(e)
 // Skip forward or backward -- blur must be redone
 function skip(delta)
 {
+  // First, we progress the clouds
+  progressCloudLayers(cloudLayers, delta*60);
+
   ME.J += delta/24;
   document.getElementById("J").innerText = daysAndHours(ME.J);
   showIt(ME.LAT, ME.LON, (ME.J - EPOCH)*24);
@@ -468,8 +573,8 @@ function runSD(lat, lon, epoch, dur)
 window.addEventListener('DOMContentLoaded', () =>
 {
   readMap();
-  document.getElementById('counter').value = (stepCount.toString()).replace(/\s+/g,' ');
-  document.getElementById('divisor').value = (stepDivisor.toString()).replace(/\s+/g,' ');
+  document.getElementById('counter').value = (stepCount.toString()).replace(/\/\/.*/,'').replace(/\s+/g,' ');
+  document.getElementById('divisor').value = (stepDivisor.toString()).replace(/\/\/.*/,'').replace(/\s+/g,' ');
   document.getElementById("J").innerText = daysAndHours(ME.J);
 });
 
@@ -494,7 +599,18 @@ function saveAll()
       ME: ME,
       observations: observations,
       counter: stepCount.toString(),
-      divisor: stepDivisor.toString()
+      divisor: stepDivisor.toString(),
+      data: data,
+      image: image,
+      blur: blur,
+      sol: sol,
+      H: solH,
+      W: solW,
+      delta: delta,
+      SNR: SNR,
+      clouds: cloudLayers,
+      cloudList: cloudList,
+      PARAMS: PARAMS
   });
   let blob = new Blob([savedata], {type: "application/json"});
   let url = URL.createObjectURL(blob);
@@ -516,21 +632,45 @@ function loadAll()
     let reader = new FileReader();
     reader.addEventListener("load", () =>
     {
-      let data = JSON.parse(reader.result);
-      WIDTH = data.WIDTH;
-      ME = data.ME;
-      observations = data.observations;
+      let rdata = JSON.parse(reader.result);
+      WIDTH = rdata.WIDTH;
+      ME = rdata.ME;
+      observations = rdata.observations;
 
-      if (data.counter)
+      if (rdata.counter)
       {
-        document.getElementById('counter').value = data.counter;
+        document.getElementById('counter').value = rdata.counter.replace(/\/\/.*/,'');
         setCounter();
       }
-      if (data.divisor)
+      if (rdata.divisor)
       {
-        document.getElementById('divisor').value = data.divisor;
+        document.getElementById('divisor').value = rdata.divisor.replace(/\/\/.*/,'');
+console.log(rdata.divisor);
         setDivisor();
       }
+      if (rdata.data) data = rdata.data;
+      if (rdata.blur)
+      {
+        blur = rdata.blur;
+        showBlur();
+      }
+      if (rdata.image) image = rdata.image;
+      if (rdata.sol)
+      {
+        sol = rdata.sol;
+        solH = rdata.H;
+        solW = rdata.W;
+        delta = rdata.delta;
+        SNR = rdata.SNR;
+        showDeblur(sol, solH, solW);
+        showResult();
+      }
+      if (rdata.clouds)
+      {
+        cloudLayers = rdata.clouds;
+        cloudList = rdata.cloudList;
+      }
+      if (rdata.PARAMS) PARAMS = rdata.PARAMS;
 
       document.getElementById("nobs").innerText = observations.length;
       document.getElementById("J").innerText = daysAndHours(ME.J);
@@ -609,6 +749,7 @@ function workFit(e)
   var IMSIZE = context.IMSIZE;
   var HEIGHT = context.HEIGHT;
   var SRATIO = context.SRATIO;
+  var DSR = context.DSR;
   var E = new Function ('IMSIZE', 'HEIGHT', 'r', context.E + "; return E(r);");
   var getIllumination = new Function('LAT', 'LON', 'J', context.getIllumination + "; return getIllumination(LAT, LON, J);");
 
@@ -616,6 +757,10 @@ function workFit(e)
   function getSize(N)
   {
     let solution;
+
+    // We want half resolution:
+    N = Math.ceil(N/DSR);
+
     while (!solution && N > 0)
     {
       // Find all factor pairs that satisfy aspect ratio
@@ -783,12 +928,13 @@ function workFit(e)
 // These helpers are to be revised
 function stepDivisor()
 {
-  return 2000; // observations.length;
+  return PARAMS.GDIV;
 }
+// observations.length;
 
 function stepCount()
 {
-  return 500;
+  return PARAMS.ITER;
 }
 
 // Used for evaluating the goodness of the fit
@@ -822,8 +968,13 @@ function resample(val, M, DM, N, K, L)
   return res;
 }
 
+function showResult()
+{
+  document.getElementById('comment').innerHTML = `Model height: ${sglobe.height}, width: ${sglobe.width}<br/>` +
+                                                 `Residual: ${delta.toPrecision(3)}, SNR: ${SNR.toPrecision(3)}`;
+}
 
-function doFit()
+function doFit(callback)
 {
 //  var m = model();
 //  sol = constrainedLeastSquares(observations.map(o => o.S),observations.map(o => o.blur),-600,600);
@@ -833,8 +984,6 @@ function doFit()
   document.isFitting = true;
   document.body.style.cursor = 'wait';
   document.querySelectorAll('.controls button').forEach((e) => {e.disabled = true; e.style.cursor = 'inherit'; });
-
-  var delta;
 
   var worker = new Worker(window.URL.createObjectURL(new Blob(["onmessage=" + workFit.toString()], {type: "text/javascript"})));
   worker.onmessage = function(e)
@@ -849,6 +998,8 @@ function doFit()
     else
     {
       sol = result.sol;
+      solH = result.H;
+      solW = result.W;
       document.getElementById('progress').innerHTML = '';
       showDeblur(sol, result.H, result.W);
       document.isFitting = false;
@@ -870,14 +1021,16 @@ function doFit()
 
       let error = Math.sqrt((orig.map((d,i) => ((((d-oavg)*ssdv/osdv+savg)) - sol[i])**2)).reduce((a,b)=>a+b)/sol.length);
 
-      let SNR = savg / error;
+      SNR = savg / error;
 
-      document.getElementById('comment').innerHTML = "Model height: " + sglobe.height + ", width: " + sglobe.width + "<br/>" +
-                                                     "Residual: " + delta.toPrecision(3) + ", SNR: " + SNR.toPrecision(3);
+      showResult();
+
+      if (callback) callback();
     }
   }
 
   worker.postMessage({ME: ME, SIDAY:SIDAY, STEPDIV: stepDivisor(), KMAX: stepCount(), RADIUS:RADIUS, EPOCH: EPOCH, observations: observations,
-                      IMSIZE: IMSIZE, HEIGHT: HEIGHT, SRATIO: SRATIO, E: E.toString(), getIllumination : getIllumination.toString()});
+                      IMSIZE: IMSIZE, HEIGHT: HEIGHT, SRATIO: SRATIO, DSR: PARAMS.DSR, E: E.toString(),
+                      getIllumination : getIllumination.toString()});
 
 }

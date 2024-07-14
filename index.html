@@ -6,21 +6,243 @@ td
 {
   vertical-align: top;
 }
+
+/* Modal styles */
+.modal
+{
+  display: none;
+  position: fixed;
+  z-index: 1;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgba(0, 0, 0, 0.4);
+}
+
+.modal-content
+{
+  background-color: #fefefe;
+  margin: 15% auto;
+  padding: 5px;
+  border: 1px solid #888;
+  width: 80%;
+  max-width: 340px;
+  white-space: nowrap;
+  font-family: sans-serif;
+  font-size: 14px;
+}
+
+.modal-content button
+{
+  margin-top: 10px;
+  padding: 5px;
+  min-width: 80px;
+}
+
+.modal-header
+{
+  background-color: #568;
+  margin-top: -5px;
+  margin-left: -5px;
+  margin-right: -5px;
+  padding-bottom: 10px;
+  padding-top: 10px;
+  padding-left: 10px;
+  color: white;
+}
+
+.modal label
+{
+  min-width: 170px;
+  display: inline-block;
+  margin-left: 35px;
+}
+
+.modal input[type=number]
+{
+  width: 100px;
+  text-align: right;
+}
+
+.modal-section
+{
+  font-weight: bold;
+  text-decoration: underline;
+  margin-left: revert !important;
+}
+
+.okrow
+{
+  text-align: right;
+  margin-right: 20px;
+  margin-top: 20px;
+  margin-bottom: 10px;
+}
+
+.close
+{
+  // color: #aaa;
+  color: white;
+  float: right;
+  font-size: 28px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.close:hover,
+.close:focus
+{
+  color: black;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+#model-selection div
+{
+  margin-bottom: 5px;
+}
+
 </style>
+<script lang="javascript" src="clouds.js"></script>
 <script lang="javascript" src="temporal.js"></script>
+  <script>
+document.addEventListener('DOMContentLoaded', function()
+{
+  const modal = document.getElementById('CollectDlg');
+  const CollectBtn = document.getElementById('CollectBtn');
+  const SaveBtn = document.getElementById('SaveBtn');
+  const span = document.getElementsByClassName('close')[0];
+
+  // When the user clicks on <span> (x), close the modal
+  span.onclick = function()
+  {
+    closeModal();
+  }
+
+  // When the user clicks anywhere outside of the modal, close it
+  window.onclick = function(event)
+  {
+    const modal = document.getElementById('CollectDlg');
+    if (event.target == modal)
+    {
+      closeModal();
+    }
+  }
+
+  // Function to show the modal
+  function showModal()
+  {
+    document.getElementById('DSR').value = PARAMS.DSR;
+    document.getElementById('ITER').value = PARAMS.ITER;
+    document.getElementById('GDIV').value = PARAMS.GDIV;
+    document.getElementById('NINT').value = PARAMS.NINT;
+    document.getElementById('INTER').value = PARAMS.INTER;
+    document.getElementById('SAMPLES').value = PARAMS.SAMPLES;
+    document.getElementById('CLOUDS').value = THRESHOLD;
+
+
+    modal.style.display = 'block';
+  }
+
+  // Function to close the modal
+  function closeModal()
+  {
+    modal.style.display = 'none';
+  }
+
+  function saveSettings()
+  {
+    PARAMS.DSR = 1 * document.getElementById('DSR').value;
+    PARAMS.ITER = 1 * document.getElementById('ITER').value;
+    PARAMS.GDIV = 1 * document.getElementById('GDIV').value;
+    PARAMS.NINT = 1 * document.getElementById('NINT').value;
+    PARAMS.INTER = 1 * document.getElementById('INTER').value;
+    PARAMS.SAMPLES = 1 * document.getElementById('SAMPLES').value;
+    THRESHOLD = 1 * document.getElementById('CLOUDS').value;
+
+    cloudLayers = initializeCloudLayers(HEIGHT, 4, THRESHOLD);
+    showIt(ME.LAT, ME.LON, (ME.J - EPOCH)*24);
+
+    closeModal();
+  }
+
+  // Event listener for the modal form submission
+  MODForm.onsubmit = function(event)
+  {
+    event.preventDefault();
+
+    saveSettings();
+
+    collectData(PARAMS.NINT, PARAMS.INTER, PARAMS.SAMPLES);
+  }
+
+  SaveBtn.addEventListener('click', saveSettings);
+
+  // Event listener for the 'Collect' button
+  CollectBtn.addEventListener('click', showModal);
+});
+  </script>
+
 </head>
 <body>
 <table style='border: 0'>
 <tr><td><div style='min-height: 135px'>
+
+<!-- Modal -->
+<div id="CollectDlg" class="modal">
+  <div class="modal-content">
+    <span class="close">&times;</span>
+    <p class='modal-header'>Model parameters</p>
+    <form id="MODForm">
+    <div id="model-selection">
+      <div>
+        <label for="DSR">Downsampling ratio:</label>
+        <input type="number" step="any" id="DSR" name="DSR">
+      </div>
+      <div>
+        <label for="ITER">Iteration count</label>
+        <input type="number" step="any" id="ITER" name="ITER">
+      </div>
+      <div>
+        <label for="GDIV">Gradient divisor</label>
+        <input type="number" step="any" id="GDIV" name="GDIV">
+      </div>
+      <div>
+        <label for="NINT">Number of intervals</label>
+        <input type="number" step="any" id="NINT" name="NINT">
+      </div>
+      <div>
+        <label for="INTER">Interval (hours):</label>
+        <input type="number" step="any" id="INTER" name="INTER">
+      </div>
+      <div>
+        <label for="SAMPLES">Samples per interval:</label>
+        <input type="number" step="any" id="SAMPLES" name="SAMPLES">
+      </div>
+      <div>
+        <label for="CLOUDS">Cloud threshold:</label>
+        <input type="number" step="any" id="CLOUDS" name="CLOUDS">
+      </div>
+    </div>
+    <div class='okrow'>
+      <button id="SaveBtn" type="button">Save</button>&nbsp;<button type="submit">Run!</button>
+    </div>
+    </form>
+  </div>
+</div>
+
+
 <h1>The RIBFED experiment -- temporal testing ground</h1>
 <p>Rotate, Illuminate, Blur =&gt; Focus, Equalize, Deconvolve. Because that's what we do.</p>
-<p><button onclick='loadAll()'>Load dataset</button>&nbsp;&nbsp;<button onclick='saveAll()'>Save dataset</button>&nbsp;&nbsp;&nbsp;<b><span id='nobs'>0</span> observations so far.</b> The Julian date is <span id='J'>0</span></p>
-<table border=0>
+<p><button onclick='loadAll()'>Load dataset</button>&nbsp;&nbsp;<button onclick='saveAll()'>Save dataset</button>&nbsp;&nbsp;&nbsp;<b><span id='nobs'>0</span> data points.</b> Julian date: <span id='J'>0</span>. Cloud cover: <span id='clouds'>0</span>%.</p>
+<table style='display: none' border=0>
 <tr><td>Counter:&nbsp;</td><td><input id='counter' style='width: 40em'></input>&nbsp;<button onclick='setCounter()'>Set</button></td></tr>
 <tr><td>Divisor:&nbsp;</td><td><input id='divisor' style='width: 40em'></input>&nbsp;<button onclick='setDivisor()'>Set</button></td></tr>
-</table>
+</table><div style='min-height: 52px'>&nbsp;</div>
 <p id='comment'>&nbsp;</p>
-<p class='controls'><button title='Skip back a week' onclick='skip(-7*SIDAY)'>&#10074;&#9664;&#9664;</button>&nbsp;<button title='Skip back an hour' onclick='skip(-1)'>&#10074;&#9664;</button>&nbsp;&nbsp;<button onclick='runBlur()' title='Blur!'>&#10054;</button>&nbsp;&nbsp;<button title='Skip an hour' onclick='skip(1)'>&#9654;&#10074;</button>&nbsp;<button title='Skip a week' onclick='skip(7*SIDAY)'>&#9654;&#9654;&#10074;</button>&nbsp;&nbsp;&nbsp;<button title='Run a day' onclick='runIt(ME.LAT,ME.LON,(ME.J - EPOCH)*24,24)'>&#9654;</button>&nbsp;&nbsp;&nbsp;<button title='Run a year' onclick='runSD(ME.LAT,ME.LON,(ME.J - EPOCH)*24,365.25*24)'>&#9654;&#9654;</button>&nbsp;&nbsp;&nbsp;<button title='Fit!' onClick='doFit()'>&#9868;</button>&nbsp;&nbsp;&nbsp;<span id='progress'></span></p></div>
+<p class='controls'><button title='Skip back a week' onclick='skip(-7*SIDAY)'>&#10074;&#9664;&#9664;</button>&nbsp;<button title='Skip back an hour' onclick='skip(-1)'>&#10074;&#9664;</button>&nbsp;&nbsp;<button onclick='runBlur()' title='Blur!'>&#10054;</button>&nbsp;&nbsp;<button title='Skip an hour' onclick='skip(1)'>&#9654;&#10074;</button>&nbsp;<button title='Skip a week' onclick='skip(7*SIDAY)'>&#9654;&#9654;&#10074;</button>&nbsp;&nbsp;&nbsp;<button title='Run a day' onclick='runIt(ME.LAT,ME.LON,(ME.J - EPOCH)*24,24)'>&#9654;</button>&nbsp;&nbsp;&nbsp;<button title='Run a year' onclick='runSD(ME.LAT,ME.LON,(ME.J - EPOCH)*24,365.25*24)'>&#9654;&#9654;</button>&nbsp;&nbsp;&nbsp;<button title='Fit!' onClick='doFit()'>&#9868;</button>&nbsp;&nbsp;&nbsp;<button id='CollectBtn'>Collect Data</button>&nbsp;&nbsp;&nbsp;<span id='progress'></span></p></div>
 </td><td id='deblur'></td></tr>
 <tr><td id='orig'></td><td id='cia'></td></tr>
 <tr><td id='blurred'></td><td id='spinner'></td></tr>
